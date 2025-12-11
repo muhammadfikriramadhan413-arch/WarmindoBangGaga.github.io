@@ -98,26 +98,33 @@ function tambah_data_menu()
     $kategori = htmlspecialchars($_POST["kategori"]);
     $status   = htmlspecialchars($_POST["status"]);
     $gambar   = $_FILES["gambar"]["name"];
-
-    // Format gambar
-    $format = ["jpg", "jpeg", "png", "gif"];
-    $ext = strtolower(pathinfo($gambar, PATHINFO_EXTENSION));
-
-    if (!in_array($ext, $format)) {
-        echo "<script>alert('File bukan gambar!');</script>";
+ 
+    // Cek apakah ada gambar yang diupload
+    if ($_FILES['gambar']['error'] === 4) { // 4 = UPLOAD_ERR_NO_FILE
+        echo "<script>alert('Anda harus mengupload gambar!');</script>";
         return -1;
     }
-
-    // Upload gambar
-    $nama_gambar = uniqid() . ".$ext";
-    move_uploaded_file($_FILES["gambar"]["tmp_name"], "src/img/$nama_gambar");
-
+ 
+    // Proses upload gambar
+    $nama_gambar = upload_gambar($_FILES['gambar']);
+    if (!$nama_gambar) {
+        // upload_gambar() akan menampilkan alert jika gagal
+        return -1;
+    }
+ 
     // Generate kode menu
-    $kode = ambil_data("SELECT MAX(SUBSTR(kode_menu, 3)) AS kode FROM menu")[0]["kode"];
-    $kode = $kode == null ? 1 : $kode + 1;
+    $result = mysqli_query($koneksi, "SELECT MAX(id_menu) AS max_id FROM menu");
+    $row = mysqli_fetch_assoc($result);
+    $kode = $row['max_id'] == null ? 1 : $row['max_id'] + 1;
     $kode_menu = "MN" . $kode;
-
-    mysqli_query($koneksi, "INSERT INTO menu VALUES ('$kode', '$kode_menu', '$nama', $harga, '$nama_gambar', '$kategori', '$status')");
+ 
+    // Menggunakan prepared statement untuk keamanan
+    $stmt = mysqli_prepare($koneksi, "INSERT INTO menu (id_menu, kode_menu, nama, harga, gambar, kategori, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    if ($stmt === false) {
+        return -1; // Gagal mempersiapkan statement
+    }
+    mysqli_stmt_bind_param($stmt, "ississs", $kode, $kode_menu, $nama, $harga, $nama_gambar, $kategori, $status);
+    mysqli_stmt_execute($stmt);
     return mysqli_affected_rows($koneksi);
 }
 
@@ -137,35 +144,27 @@ function edit_data_menu()
     $status    = htmlspecialchars($_POST["status"]);
     $kode_menu = htmlspecialchars($_POST["kode_menu"]);
 
-    $gambar_lama = $_POST["gambar-lama"];
-    $gambar_baru = $_FILES["gambar"]["name"];
+    $gambar_lama = htmlspecialchars($_POST["gambar-lama"]);
 
-    if ($gambar_baru) {
-        $ext = strtolower(pathinfo($gambar_baru, PATHINFO_EXTENSION));
-        $format = ["jpg", "jpeg", "png", "gif"];
-
-        if (!in_array($ext, $format)) {
-            echo "<script>alert('Format gambar tidak valid!');</script>";
-            return -1;
+    // Cek apakah user mengupload gambar baru
+    if ($_FILES['gambar']['error'] !== 4) { // 4 = UPLOAD_ERR_NO_FILE
+        $gambar_baru = upload_gambar($_FILES['gambar']);
+        if (!$gambar_baru) {
+            return -1; // Gagal upload
         }
-
-        move_uploaded_file($_FILES["gambar"]["tmp_name"], "src/img/$gambar_baru");
-        unlink("src/img/$gambar_lama");
+        // Hapus gambar lama jika ada
+        if (file_exists("src/img/$gambar_lama")) {
+            unlink("src/img/$gambar_lama");
+        }
         $gambar = $gambar_baru;
     } else {
         $gambar = $gambar_lama;
     }
 
-    mysqli_query($koneksi, "UPDATE menu SET 
-        kode_menu = '$kode_menu',
-        nama      = '$nama',
-        harga     = $harga,
-        gambar    = '$gambar',
-        kategori  = '$kategori',
-        status    = '$status'
-        WHERE id_menu = $id_menu
-    ");
-
+    // Menggunakan prepared statement untuk keamanan
+    $stmt = mysqli_prepare($koneksi, "UPDATE menu SET kode_menu = ?, nama = ?, harga = ?, gambar = ?, kategori = ?, status = ? WHERE id_menu = ?");
+    mysqli_stmt_bind_param($stmt, "ssisssi", $kode_menu, $nama, $harga, $gambar, $kategori, $status, $id_menu);
+    mysqli_stmt_execute($stmt);
     return mysqli_affected_rows($koneksi);
 }
 
@@ -180,11 +179,27 @@ function hapus_data_menu()
 
     $id = $_GET["id_menu"];
 
-    $gambar = ambil_data("SELECT gambar FROM menu WHERE id_menu = $id")[0]["gambar"];
-    if (file_exists("src/img/$gambar")) unlink("src/img/$gambar");
+    // Ambil nama gambar sebelum dihapus dari DB
+    $stmt_select = mysqli_prepare($koneksi, "SELECT gambar FROM menu WHERE id_menu = ?");
+    mysqli_stmt_bind_param($stmt_select, "i", $id);
+    mysqli_stmt_execute($stmt_select);
+    $result = mysqli_stmt_get_result($stmt_select);
+    $data = mysqli_fetch_assoc($result);
+    $gambar = $data['gambar'];
 
-    mysqli_query($koneksi, "DELETE FROM menu WHERE id_menu = $id");
-    return mysqli_affected_rows($koneksi);
+    // Hapus data dari database
+    $stmt_delete = mysqli_prepare($koneksi, "DELETE FROM menu WHERE id_menu = ?");
+    mysqli_stmt_bind_param($stmt_delete, "i", $id);
+    mysqli_stmt_execute($stmt_delete);
+
+    $affected_rows = mysqli_affected_rows($koneksi);
+
+    // Jika data berhasil dihapus dari DB, hapus file gambarnya
+    if ($affected_rows > 0 && $gambar && file_exists("src/img/$gambar")) {
+        unlink("src/img/$gambar");
+    }
+
+    return $affected_rows;
 }
 
 
@@ -290,5 +305,35 @@ function ambil_pesanan_lengkap() {
     return ambil_data($query);
 }
 
+// ==============================
+// FUNCTION UPLOAD GAMBAR
+// ==============================
+function upload_gambar($file)
+{
+    $namaFile = $file['name'];
+    $ukuranFile = $file['size'];
+    $tmpName = $file['tmp_name'];
+
+    // Validasi ekstensi gambar
+    $ekstensiValid = ['jpg', 'jpeg', 'png', 'gif'];
+    $ekstensiGambar = strtolower(pathinfo($namaFile, PATHINFO_EXTENSION));
+    if (!in_array($ekstensiGambar, $ekstensiValid)) {
+        echo "<script>alert('File yang diupload bukan gambar!');</script>";
+        return false;
+    }
+
+    // Validasi ukuran file (misal: maks 2MB)
+    if ($ukuranFile > 2000000) {
+        echo "<script>alert('Ukuran gambar terlalu besar! Maksimal 2MB.');</script>";
+        return false;
+    }
+
+    // Generate nama file baru dengan timestamp untuk menghindari duplikasi
+    $namaFileBaru = time() . '_' . uniqid() . '.' . $ekstensiGambar;
+
+    // Pindahkan file ke folder tujuan
+    move_uploaded_file($tmpName, 'src/img/' . $namaFileBaru);
+    return $namaFileBaru;
+}
 
 ?>
