@@ -310,30 +310,51 @@ function ambil_pesanan_lengkap() {
 // ==============================
 function upload_gambar($file)
 {
-    $namaFile = $file['name'];
+    $namaFile   = $file['name'];
     $ukuranFile = $file['size'];
-    $tmpName = $file['tmp_name'];
+    $tmpName    = $file['tmp_name'];
 
-    // Validasi ekstensi gambar
-    $ekstensiValid = ['jpg', 'jpeg', 'png', 'gif'];
+    // 1. Validasi Ekstensi
+    $ekstensiValid  = ['jpg', 'jpeg', 'png', 'gif'];
     $ekstensiGambar = strtolower(pathinfo($namaFile, PATHINFO_EXTENSION));
     if (!in_array($ekstensiGambar, $ekstensiValid)) {
-        echo "<script>alert('File yang diupload bukan gambar!');</script>";
+        echo "<script>alert('Format gambar harus JPG, JPEG, PNG, atau GIF!');</script>";
         return false;
     }
 
-    // Validasi ukuran file (misal: maks 2MB)
+    // 2. Validasi Ukuran File (misal: maks 2MB)
     if ($ukuranFile > 2000000) {
         echo "<script>alert('Ukuran gambar terlalu besar! Maksimal 2MB.');</script>";
         return false;
     }
 
-    // Generate nama file baru dengan timestamp untuk menghindari duplikasi
-    $namaFileBaru = time() . '_' . uniqid() . '.' . $ekstensiGambar;
+    // 3. Buat gambar dari file yang diunggah berdasarkan ekstensinya
+    switch ($ekstensiGambar) {
+        case 'jpg':
+        case 'jpeg':
+            $sumber = imagecreatefromjpeg($tmpName);
+            break;
+        case 'png':
+            $sumber = imagecreatefrompng($tmpName);
+            // Menjaga transparansi untuk PNG
+            imagepalettetotruecolor($sumber);
+            imagealphablending($sumber, true);
+            imagesavealpha($sumber, true);
+            break;
+        case 'gif':
+            $sumber = imagecreatefromgif($tmpName);
+            break;
+    }
 
-    // Pindahkan file ke folder tujuan
-    move_uploaded_file($tmpName, 'src/img/' . $namaFileBaru);
-    return $namaFileBaru;
+    // 4. Generate nama file baru dengan ekstensi .webp
+    $namaFileBaru = time() . '_' . uniqid() . '.webp';
+    $tujuan = 'src/img/' . $namaFileBaru;
+
+    // 5. Simpan gambar sebagai WebP dengan kualitas 80
+    imagewebp($sumber, $tujuan, 80);
+    imagedestroy($sumber);
+
+    return $namaFileBaru; // Kembalikan nama file .webp yang baru
 }
 
 ?>
