@@ -233,5 +233,15 @@ document.getElementById("toggleSidebar").onclick = function() {
 };
 </script>
 
+<?php if (isset($_SESSION["akun-admin"]) && isset($_SESSION["notif-pesanan-baru"])) : ?>
+<script>
+    // Buat objek audio
+    const notifSound = new Audio('src/audio/notifikasi.mp3');
+
+    // Putar suara notifikasi
+    notifSound.play().catch(error => console.error("Gagal memutar suara:", error));
+</script>
+<?php endif; ?>
+
 </body>
 </html>
