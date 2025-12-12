@@ -10,6 +10,11 @@ if (!isset($_SESSION["akun-admin"]) && !isset($_SESSION["akun-user"])) {
 if (isset($_GET["transaksi"])) {
     $menu = ambil_data("SELECT * FROM transaksi");
 } else if (isset($_GET["pesanan"])) {
+    // Hapus notifikasi jika admin mengunjungi halaman pesanan
+    if (isset($_SESSION["notif-pesanan-baru"])) {
+        unset($_SESSION["notif-pesanan-baru"]);
+    }
+
     $menu = ambil_data("
         SELECT p.kode_pesanan, tk.nama_pelanggan, p.kode_menu, p.qty
         FROM pesanan AS p
@@ -33,9 +38,12 @@ if (isset($_GET["transaksi"])) {
 
 if (isset($_POST["pesan"])) {
     $pesanan = tambah_data_pesanan();
-    echo $pesanan > 0
-    ? "<script>alert('Pesanan Berhasil Dikirim!');</script>"
-    : "<script>alert('Pesanan Gagal Dikirim!');</script>";
+    if ($pesanan > 0) {
+        $_SESSION["notif-pesanan-baru"] = true; // Set notifikasi untuk admin
+        echo "<script>alert('Pesanan Berhasil Dikirim!');</script>";
+    } else {
+        echo "<script>alert('Pesanan Gagal Dikirim!');</script>";
+    }
 }
 ?>
 
@@ -193,10 +201,15 @@ body {
 <div id="sidebar" class="sidebar glass">
     <h4 class="mb-4">Menu</h4>
     <a href="index.php">🍜 Menu</a>
-    <?php if (isset($_SESSION["akun-admin"])) { ?>
-    <a href="index.php?pesanan">🧾 Pesanan</a>
+    <?php if (isset($_SESSION["akun-admin"])) : ?>
+    <a href="index.php?pesanan">
+        🧾 Pesanan
+        <?php if (isset($_SESSION["notif-pesanan-baru"])) : ?>
+            <span class="badge bg-danger rounded-pill ms-2">Baru</span>
+        <?php endif; ?>
+    </a>
     <a href="index.php?transaksi">💰 Transaksi</a>
-    <?php } ?>
+    <?php endif; ?>
 </div>
 
 <!-- CONTENT -->
